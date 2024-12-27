@@ -52,7 +52,7 @@ def page_not_found(e):
     return render_template('404.html'), 404
 
 
-def process_task(task):
+async def process_task(task):
     global current_concurrent_requests
     current_concurrent_requests += 1
 
@@ -62,16 +62,16 @@ def process_task(task):
 
     filename = filename.split('.')[0]
     result = start_process(gender, race, filename)
-    return result
+    await result
 
 
-def process_tasks():
+async def process_tasks():
     global current_concurrent_requests
     while not stop_processing.is_set():
         if task_queue:
             task = task_queue.pop(0)
             try:
-                process_task(task)
+                await process_task(task)
                 print(f"Обработка задачи {task} завершена")
             except Exception as e:
                 print(f"Ошибка при обработке задачи {task}: {e}")
