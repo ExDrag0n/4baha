@@ -123,3 +123,94 @@ if __name__ == '__main__':
         app.run(host="127.0.0.1", port=8080, debug=True)
     finally:
         stop_processing.set()
+##################################################################################################################################
+##################################################################################################################################
+##  БЫЛ ЕЩЁ ВАРИАНТ С ТРЕДАМИ, КОТОРЫЙ ДО ЭТОГО СЕРВ КРАШИЛ, НО Я ОПТИМИЗИРОВАЛ ПРОЦЕСС, ТЕПЕРЬ ХОТЬ 10 ПОТОКОВ ОДНОВРЕМЕННО    ##
+##  НО ТАМ НА КОЛ-ВО ПОТОКОВ ОГРАНИЧЕНИЯ НЕТ + КОГДА ЗАПРОСОВ МНОГО НЕКОТОРЫЕ В БЕСКОНЧЕНОЕ ОЖИДАНИЕ УХОДЯТ ПО КАКОЙ ТО ПРИЧИНЕ ##
+##  ЕГО КОД ПРИЛАГАЮ НИЖЕ. ЕЩЁ РАЗ СПАСИБО ЗА ПОМОЩЬ <3                                                                         ##
+##################################################################################################################################
+##################################################################################################################################
+from flask import Flask, request, send_file, abort, jsonify
+from werkzeug.utils import secure_filename
+import os
+import cv2
+import numpy as np
+from main import start_process
+import ipaddress
+from threading import Thread
+import threading
+import uuid
+
+
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = './output_images'
+
+
+def clear_all(filename):
+    if len(os.listdir('res_video')) != 0:
+        for file in os.listdir('res_video'):
+            for _ in os.listdir('res_video'):
+                if os.path.isfile(f'res_video/{filename}.mp4'):
+                    os.remove(f'res_video/{filename}.mp4')
+        print(f'res_video cleared')
+    if len(os.listdir('4pres')) != 0:
+        for _ in os.listdir('4pres'):
+            for i in range(1,8):
+                if os.path.isfile(f'4pres/{filename}_{i}.png'):
+                    os.remove(f'4pres/{filename}_{i}.png')
+        print(f'4pres cleared')
+    if len(os.listdir('output_images')) != 0:
+        for _ in os.listdir('output_images'):
+            for i in range(7):
+                if os.path.isfile(f'output_images/{filename}_000{i}.png'):
+                    os.remove(f'output_images/{filename}_000{i}.png')
+        print(f'output_images cleared')
+    if len(os.listdir('results/males_model/test_latest/traversal')) != 0:
+        for file in os.listdir('results/males_model/test_latest/traversal'):
+            for _ in os.listdir('results/males_model/test_latest/traversal'):
+                if os.path.isfile(f'results/males_model/test_latest/traversal/{filename}.mp4'):
+                    os.remove(f"results/males_model/test_latest/traversal/{filename}.mp4")
+                    print(f'age video (male) cleared {filename}')
+    if len(os.listdir('results/females_model/test_latest/traversal')) != 0:
+        for file in os.listdir('results/females_model/test_latest/traversal'):
+            if os.path.isfile(f'results/females_model/test_latest/traversal/{filename}.mp4'):
+                os.remove(f"results/females_model/test_latest/traversal/{filename}.mp4")
+                print(f'age video (female) cleared {filename}')
+
+@app.route('/process', methods=['POST'])
+def process_image():
+    with open("dlt_lst.txt", "r") as f:
+        dlt_file = f.readline()
+    # client_ip = request.remote_addr
+    # if client_ip not in ALLOWED_IPS:
+    #     abort(403)
+
+    image_file = request.files['image']
+    gender = request.form['gender']
+    race = request.form['race']
+
+    if not image_file or not gender:
+        return jsonify({'error': 'Отсутствуют обязательные поля'}), 400
+    # Сохранение изображения
+    filename = str(uuid.uuid4())
+    image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename + '.jpg')
+    print(image_path)
+    image_file.save(image_path)
+    print('Запуск потока')
+    thread = Thread(target=lambda: start_process(gender, race, filename))
+    thread.start()
+    thread.join()
+    # каждый поток выполняет код ниже только по его завершении
+    with open("dlt_lst.txt", "w") as delete_list:
+        delete_list.write(filename)
+    result = f"res_video/{filename}.mp4"
+    return send_file(result, mimetype='video/mp4'), clear_all(filename)
+
+
+if __name__ == '__main__':
+    from waitress import serve
+    serve(app, host="0.0.0.0", port=8080)
+
+
+
+
