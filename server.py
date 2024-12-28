@@ -210,6 +210,131 @@ def process_image():
 if __name__ == '__main__':
     from waitress import serve
     serve(app, host="0.0.0.0", port=8080)
+#########################################################################################################
+###################                     ВАРИАНТ С FASTAPI                ################################
+#########################################################################################################
+import asyncio
+from fastapi import FastAPI, BackgroundTasks, File, Form
+from fastapi.responses import StreamingResponse
+from io import BytesIO
+import os
+import uuid
+from queue import Queue
+from contextlib import asynccontextmanager
+from main import start_process
+
+MAX_CONCURRENT_REQUESTS = 3
+current_concurrent_requests = 0
+task_queue = Queue()
+
+ALLOWED_IPS = ["128.140.77.233"]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Начинаем фоновую задачу для обработки очереди
+    asyncio.create_task(process_tasks())
+    yield
+
+
+async def process_task(task):
+    global current_concurrent_requests
+    current_concurrent_requests += 1
+
+    gender = task['gender']
+    race = task['race']
+    filename = task['filename']
+
+    try:
+        filename = filename.split('.')[0]
+        result = await start_process(gender, race, filename)
+        await result
+    finally:
+        current_concurrent_requests -= 1
+
+
+async def process_tasks():
+    global current_concurrent_requests
+    while True:
+        if current_concurrent_requests < MAX_CONCURRENT_REQUESTS and not task_queue.empty():
+            task = task_queue.get_nowait()
+            await process_task(task)
+        else:
+            # Если количество параллельных задач достигло лимита, ждём
+            await asyncio.sleep(1)
+
+
+def clear_all(filename_male):
+    if len(os.listdir('4pres')) != 0:
+        for i in range(1, 8):
+            if os.path.isfile(f'4pres/{filename_male}_{i}.png'):
+                os.remove(f'4pres/{filename_male}_{i}.png')
+                print(f'4pres/{filename_male}_{i}.png deleted')
+    if len(os.listdir('output_images')) != 0:
+        if os.path.isfile(f'output_images/{filename_male}.jpg'):
+            os.remove(f'output_images/{filename_male}.jpg')
+            print(f'output_images/{filename_male}.jpg cleared')
+    if len(os.listdir('output_images')) != 0:
+        for i in range(7):
+            if os.path.isfile(f'output_images/{filename_male}_000{i}.png'):
+                os.remove(f'output_images/{filename_male}_000{i}.png')
+                print(f'output_images/{filename_male}_000{i}.png cleared')
+    if len(os.listdir('results/males_model/test_latest/traversal')) != 0:
+        for file in os.listdir('results/males_model/test_latest/traversal'):
+            if os.path.isfile(f'results/males_model/test_latest/traversal/{filename_male}.mp4'):
+                os.remove(f"results/males_model/test_latest/traversal/{filename_male}.mp4")
+                print(f'age video (male) cleared {filename_male}.mp4')
+    if len(os.listdir('results/females_model/test_latest/traversal')) != 0:
+        for file in os.listdir('results/females_model/test_latest/traversal'):
+            if os.path.isfile(f'results/females_model/test_latest/traversal/{filename_male}.mp4'):
+                os.remove(f"results/females_model/test_latest/traversal/{filename_male}.mp4")
+                print(f'age video (female) cleared {filename_male}.mp4')
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.post("/process")
+async def process_image(background_tasks: BackgroundTasks, image: bytes = File(...), gender: str = Form(...), race: str = Form(...)):
+    print(gender, race)
+    buffer = BytesIO(image)
+    filename = str(uuid.uuid4())
+    image_path = os.path.join("./output_images", f"{filename}.jpg")
+    with open(image_path, "wb") as f:
+        f.write(buffer.getvalue())
+
+    task = {
+        'gender': gender,
+        'race': race,
+        'filename': f"{filename}"
+    }
+
+    task_queue.put_nowait(task)
+    print(f"Текущее количество задач в очереди - {task_queue.qsize()}")
+
+    # Очистка данных после обработки
+    background_tasks.add_task(clear_all, filename)
+
+    # Ожидание, пока видео не будет готово
+    while not f"{filename}.mp4" in os.listdir('res_video'):
+        print("Pending...")
+        await asyncio.sleep(5)
+
+    return StreamingResponse(generate_response(filename), media_type="video/mp4")
+
+
+async def generate_response(filename):
+    with open(f"res_video/{filename}.mp4", "rb") as video_file:
+        while True:
+            chunk = video_file.read(4096)
+            if not chunk:
+                break
+            yield chunk
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8080)
+
 
 
 
